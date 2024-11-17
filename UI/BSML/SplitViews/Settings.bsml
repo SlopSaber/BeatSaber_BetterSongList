@@ -32,6 +32,11 @@
 					choices="preferredLeaderboardChoices" bind-value="true"
 					hover-hint="Which leaderboards Star value should be displayed?"
 				/>
+				<list-setting
+					text='RT/JD/Map Age' apply-on-change="true" value="preferredMiscSetting"
+					choices="preferredMiscSettingChoices" bind-value="true"
+					hover-hint="Change Between Reaction Time and Jump Distance and Map Age"
+				/>
 				<macro.as-host host='cfgi'>
 					<slider-setting
 						text='PP Accuracy Scale (SS Only)' apply-on-change='true' value='AccuracyMultiplier' min='0.2' max='2' increment='0.02'

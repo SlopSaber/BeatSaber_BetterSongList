@@ -10,6 +10,8 @@ using IPA.Utilities;
 using TMPro;
 using UnityEngine;
 using System.Reflection;
+using System.Numerics;
+using Vector3 = UnityEngine.Vector3;
 
 namespace BetterSongList.HarmonyPatches.UI {
 	[HarmonyPatch(typeof(StandardLevelDetailView), nameof(StandardLevelDetailView.RefreshContent))]
@@ -52,10 +54,27 @@ namespace BetterSongList.HarmonyPatches.UI {
 				hhint.text = hoverHint;
 			}
 
-			ModifyValue(fields[0], "ScoreSaber PP Value", "Difficulty");
-			ModifyValue(fields[1], "Star Rating", "Favorites");
-			ModifyValue(fields[2], "NJS (Note Jump Speed)", "FastNotes");
-			ModifyValue(fields[3], "BeatSaver upload age (Months)", "Clock");
+			if(Config.Instance.PreferredLeaderboard == "ScoreSaber") {
+				ModifyValue(fields[0], "ScoreSaber PP Value", "Difficulty");
+			} else {
+				if(Config.Instance.PreferredLeaderboard == "BeatLeader")
+					ModifyValue(fields[0], "BeatLeader PP Value", "Difficulty");
+			}
+			if(Config.Instance.PreferredLeaderboard == "ScoreSaber") {
+				ModifyValue(fields[1], "ScoreSaber Star Rating", "Favorites");
+			} else {
+				if(Config.Instance.PreferredLeaderboard == "BeatLeader")
+					ModifyValue(fields[1], "BeatLeader Star Rating", "Favorites");
+			}
+			if(Config.Instance.PreferredMiscSetting == "Reaction Time") {
+				ModifyValue(fields[2], "RT (Reaction Time)", "Clock");
+			} else if(Config.Instance.PreferredMiscSetting == "Jump Distance") {
+				ModifyValue(fields[2], "JD (Jump Distance)", "Measure");
+			} else {
+				if(Config.Instance.PreferredMiscSetting == "Map Age")
+					ModifyValue(fields[2], "BeatSaver upload age (Months)", "Clock");
+			}
+			ModifyValue(fields[3], "NJS (Note Jump Speed)", "FastNotes");
 
 			fields[0].richText = true;
 			fields[0].characterSpacing = -3f;
@@ -126,10 +145,25 @@ namespace BetterSongList.HarmonyPatches.UI {
 							}
 						}
 
-						fields[3].text = SortModels.FolderDateSorter.GetMapAgeMonths((int)song.uploadTimeUnix);
+						var basicData = __instance._beatmapLevel.GetDifficultyBeatmapData(beatmapKey.beatmapCharacteristic, beatmapKey.difficulty);
+						var njs = basicData?.noteJumpMovementSpeed ?? 0;
+						if(njs == 0)
+							njs = BeatmapDifficultyMethods.NoteJumpMovementSpeed(beatmapKey.difficulty);
+
+						float JD = JumpDistanceCalculator.GetJd(__instance._beatmapLevel.beatsPerMinute, njs, basicData?.noteJumpStartBeatOffset ?? 0);
+						float RT = JumpDistanceCalculator.GetRt(__instance._beatmapLevel.beatsPerMinute, njs, basicData?.noteJumpStartBeatOffset ?? 0);
+
+						if(Config.Instance.PreferredMiscSetting == "Reaction Time") {
+							fields[2].text = ((int)RT).ToString() + " ms";
+						} else if(Config.Instance.PreferredMiscSetting == "Jump Distance") {
+							fields[2].text = JD.ToString("F1");
+						} else if(Config.Instance.PreferredMiscSetting == "Map Age") {
+							fields[2].text = SortModels.FolderDateSorter.GetMapAgeMonths((int)song.uploadTimeUnix);
+						}
+						fields[3].text = njs.ToString("0.0#");
 					}
 					wrapper();
-				// This might end up Double-Initing SongDetails but SongDetails handles that internally and only does it once so whatever
+					// This might end up Double-Initing SongDetails but SongDetails handles that internally and only does it once so whatever
 				} else if(!SongDetailsUtil.finishedInitAttempt) {
 					SongDetailsUtil.TryGet().ContinueWith(
 						x => { if(x.Result != null) UpdateState(); },
@@ -138,18 +172,7 @@ namespace BetterSongList.HarmonyPatches.UI {
 				}
 
 				// Basegame maps have no NJS or JD
-				var basicData = __instance._beatmapLevel.GetDifficultyBeatmapData(beatmapKey.beatmapCharacteristic, beatmapKey.difficulty);
-				var njs = basicData?.noteJumpMovementSpeed ?? 0;
-				if(njs == 0)
-					njs = beatmapKey.difficulty.DefaultNoteJumpMovementSpeed();
-
-				fields[2].text = njs.ToString("0.0#");
-
-				//var offset = Config.Instance.ShowMapJDInsteadOfOffset ?
-				//	JumpDistanceCalculator.GetJd(____selectedDifficultyBeatmap.level.beatsPerMinute, njs, ____selectedDifficultyBeatmap.noteJumpStartBeatOffset) :
-				//	____selectedDifficultyBeatmap.noteJumpStartBeatOffset;
-
-				//fields[3].text = offset.ToString(Config.Instance.ShowMapJDInsteadOfOffset ? "0.0" : "0.0#");
+				SharedCoroutineStarter.instance.StartCoroutine(ProcessFields());
 			}
 		}
 	}

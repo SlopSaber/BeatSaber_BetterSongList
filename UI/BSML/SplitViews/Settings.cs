@@ -19,9 +19,14 @@ namespace BetterSongList.UI.SplitViews {
 		readonly string version = $"BetterSongList v{Assembly.GetExecutingAssembly().GetName().Version.ToString(3)} by Kinsi55";
 
 		static readonly IReadOnlyList<object> preferredLeaderboardChoices = new List<object>() { "ScoreSaber", "BeatLeader" };
+		static readonly IReadOnlyList<object> preferredMiscSettingChoices = new List<object>() { "Reaction Time", "Jump Distance", "Map Age" };
 		string preferredLeaderboard {
 			get => Config.Instance.PreferredLeaderboard;
 			set => Config.Instance.PreferredLeaderboard = value;
+		}
+		string preferredMiscSetting {
+			get => Config.Instance.PreferredMiscSetting;
+			set => Config.Instance.PreferredMiscSetting = value;
 		}
 
 		static void SettingsClosed() {

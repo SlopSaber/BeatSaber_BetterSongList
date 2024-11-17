@@ -16,5 +16,8 @@ namespace BetterSongList.Util {
 		public static float GetJd(float bpm, float njs, float offset) {
 			return njs * (60f / bpm) * hjd(bpm, njs, offset) * 2;
 		}
+		public static float GetRt(float bpm, float njs, float offset) {
+			return (njs * (60f / bpm) * hjd(bpm, njs, offset) * 2) * 500 / njs;
+		}
 	}
 }
