@@ -1,4 +1,4 @@
-﻿using BeatSaberMarkupLanguage;
+using BeatSaberMarkupLanguage;
 using BetterSongList.Util;
 using HarmonyLib;
 using HMUI;
@@ -148,7 +148,7 @@ namespace BetterSongList.HarmonyPatches.UI {
 						var basicData = __instance._beatmapLevel.GetDifficultyBeatmapData(beatmapKey.beatmapCharacteristic, beatmapKey.difficulty);
 						var njs = basicData?.noteJumpMovementSpeed ?? 0;
 						if(njs == 0)
-							njs = BeatmapDifficultyMethods.NoteJumpMovementSpeed(beatmapKey.difficulty);
+							njs = BeatmapDifficultyMethods.NoteJumpMovementSpeed(beatmapKey.difficulty, 0, true);
 
 						float JD = JumpDistanceCalculator.GetJd(__instance._beatmapLevel.beatsPerMinute, njs, basicData?.noteJumpStartBeatOffset ?? 0);
 						float RT = JumpDistanceCalculator.GetRt(__instance._beatmapLevel.beatsPerMinute, njs, basicData?.noteJumpStartBeatOffset ?? 0);
