@@ -145,7 +145,7 @@ namespace BetterSongList.HarmonyPatches.UI {
 							}
 						}
 
-						var basicData = __instance._beatmapLevel.GetDifficultyBeatmapData(beatmapKey.beatmapCharacteristic, beatmapKey.difficulty);
+						var basicData = __instance._beatmapLevel.GetDifficultyBeatmapData(beatmapKey.characteristic, beatmapKey.difficulty);
 						var njs = basicData?.noteJumpMovementSpeed ?? 0;
 						if(njs == 0)
 							njs = BeatmapDifficultyMethods.NoteJumpMovementSpeed(beatmapKey.difficulty, 0, true);
