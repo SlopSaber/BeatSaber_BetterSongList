@@ -14,7 +14,7 @@ namespace BetterSongList.HarmonyPatches {
 				Config.Instance.LastPack = beatmapLevelCollection.packName ?? "";
 			}
 #if TRACE
-			Plugin.Log.Warn(string.Format("AnnotatedBeatmapLevelCollectionsViewController.HandleDidSelectAnnotatedBeatmapLevelCollection(): {0}", beatmapLevelCollection?.packName));
+			Plugin.Log.Debug(string.Format("AnnotatedBeatmapLevelCollectionsViewController.HandleDidSelectAnnotatedBeatmapLevelCollection(): {0}", beatmapLevelCollection?.packName));
 
 			//System.Console.WriteLine("=> {0}", new System.Diagnostics.StackTrace().ToString());
 #endif

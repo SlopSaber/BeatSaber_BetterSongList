@@ -40,7 +40,7 @@ namespace BetterSongList.HarmonyPatches {
 			if(lastInMapList == null)
 				return;
 #if TRACE
-			Plugin.Log.Warn(string.Format("Refresh({0})", processAsync));
+			Plugin.Log.Debug(string.Format("Refresh({0})", processAsync));
 #endif
 			/*
 			 * This probably has problems in regards to race conditions / thread safety... We will see...

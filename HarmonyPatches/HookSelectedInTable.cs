@@ -8,7 +8,7 @@ namespace BetterSongList.HarmonyPatches {
 			Config.Instance.LastSong = __instance._selectedBeatmapLevel?.levelID;
 
 #if TRACE
-			Plugin.Log.Warn(string.Format("LevelCollectionTableView.HandleDidSelectRowEvent(): LastSong: {0}", Config.Instance.LastSong));
+			Plugin.Log.Debug(string.Format("LevelCollectionTableView.HandleDidSelectRowEvent(): LastSong: {0}", Config.Instance.LastSong));
 #endif
 		}
 	}

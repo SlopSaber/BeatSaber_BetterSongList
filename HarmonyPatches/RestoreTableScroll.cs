@@ -17,7 +17,7 @@ namespace BetterSongList.HarmonyPatches {
 			doResetScrollOnNext = true;
 
 #if TRACE
-			Plugin.Log.Warn("RestoreTableScroll.ResetScroll()");
+			Plugin.Log.Debug("RestoreTableScroll.ResetScroll()");
 #endif
 		}
 
@@ -29,7 +29,7 @@ namespace BetterSongList.HarmonyPatches {
 			doResetScrollOnNext = false;
 
 #if TRACE
-			Plugin.Log.Warn(string.Format("LevelCollectionTableView.Init():Prefix - scrollToIndex: {0}", scrollToIndex));
+			Plugin.Log.Debug(string.Format("LevelCollectionTableView.Init():Prefix - scrollToIndex: {0}", scrollToIndex));
 #endif
 		}
 
@@ -38,14 +38,14 @@ namespace BetterSongList.HarmonyPatches {
 			[HarmonyPriority(int.MinValue)]
 			static void Postfix(LevelCollectionTableView __instance) {
 #if TRACE
-				Plugin.Log.Warn(string.Format("DoTheFunnySelect -> LevelCollectionTableView.SetData():Postfix scrollToIndex: {0}", scrollToIndex));
+				Plugin.Log.Debug(string.Format("DoTheFunnySelect -> LevelCollectionTableView.SetData():Postfix scrollToIndex: {0}", scrollToIndex));
 #endif
 
 				if(scrollToIndex == null || scrollToIndex < 0)
 					return;
 
 #if TRACE
-				Plugin.Log.Warn(string.Format("-> Scrolling to {0}", scrollToIndex));
+				Plugin.Log.Debug(string.Format("-> Scrolling to {0}", scrollToIndex));
 #endif
 
 				__instance._tableView.ScrollToCellWithIdx(

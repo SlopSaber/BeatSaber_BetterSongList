@@ -56,7 +56,7 @@ namespace BetterSongList.HarmonyPatches {
 
 			if(__instance._startState != null) {
 #if DEBUG
-				Plugin.Log.Warn("Not restoring last state because we are starting off from somewhere!");
+				Plugin.Log.Debug("Not restoring last state because we are starting off from somewhere!");
 #endif
 				FilterUI.SetFilter(null, false, false);
 				return;

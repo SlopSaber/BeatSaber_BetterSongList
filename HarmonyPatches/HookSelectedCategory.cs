@@ -20,7 +20,7 @@ namespace BetterSongList.HarmonyPatches {
 			lastSelectedCategory = __instance.selectedLevelCategory;
 			Config.Instance.LastCategory = __instance.selectedLevelCategory.ToString();
 #if TRACE
-			Plugin.Log.Warn("SelectLevelCategoryViewController.LevelFilterCategoryIconSegmentedControlDidSelectCell():Prefix => ResetScroll()");
+			Plugin.Log.Debug("SelectLevelCategoryViewController.LevelFilterCategoryIconSegmentedControlDidSelectCell():Prefix => ResetScroll()");
 #endif
 			RestoreTableScroll.ResetScroll();
 			FilterUI.persistentNuts?.UpdateTransformerOptionsAndDropdowns();
