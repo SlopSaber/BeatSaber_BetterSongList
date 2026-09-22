@@ -183,7 +183,7 @@ namespace BetterSongList.UI {
 
 		static readonly System.Random ran = new System.Random();
 		static void SelectRandom() {
-			var x = UnityEngine.Object.FindObjectOfType<LevelCollectionTableView>();
+			var x = UnityEngine.Object.FindFirstObjectByType<LevelCollectionTableView>();
 
 			if(x == null)
 				return;

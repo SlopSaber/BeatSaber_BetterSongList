@@ -11,7 +11,7 @@ namespace BetterSongList.Util {
 
 		public static void Load() {
 			if (playerDataModel == null)
-				playerDataModel = Object.FindObjectOfType<PlayerDataModel>();
+				playerDataModel = Object.FindFirstObjectByType<PlayerDataModel>();
 
 			foreach(var x in playerDataModel?.playerData?.levelsStatsData) {
 				if(!x.Value.validScore)
