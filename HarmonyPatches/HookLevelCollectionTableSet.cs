@@ -72,6 +72,8 @@ namespace BetterSongList.HarmonyPatches {
 		static void FilterWrapper(ref IReadOnlyList<BeatmapLevel> previewBeatmapLevels) {
 			if(filter?.isReady != true && sorter?.isReady != true)
 				return;
+			var timing = System.Diagnostics.Stopwatch.StartNew();
+			var inputCount = previewBeatmapLevels.Count;
 
 #if TRACE
 			Plugin.Log.Info(string.Format("FilterWrapper() - Main thread: {0}", IPA.Utilities.UnityGame.OnMainThread));
@@ -117,6 +119,9 @@ namespace BetterSongList.HarmonyPatches {
 					customLegend = sl.BuildLegend(beatmapLevels).ToArray();
 			} catch(Exception ex) {
 				Plugin.Log.Warn(string.Format("FilterWrapper() Exception: {0}", ex));
+			} finally {
+				if(timing.ElapsedMilliseconds >= 20)
+					Plugin.Log.Info($"Menu load trace: BetterSongList FilterWrapper={timing.ElapsedMilliseconds}ms mainThread={IPA.Utilities.UnityGame.OnMainThread} input={inputCount} output={previewBeatmapLevels.Count} filter={filter?.GetType().Name} sorter={sorter?.GetType().Name}");
 			}
 		}
 
