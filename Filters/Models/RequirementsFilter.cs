@@ -11,22 +11,20 @@ namespace BetterSongList.FilterModels {
 		static bool inited = false;
 		public Task Prepare(CancellationToken cancelToken) => Prepare(cancelToken, false);
 		public Task Prepare(CancellationToken cancelToken, bool fullReload) {
+			if(isReady)
+				return Task.CompletedTask;
+
 			if(wipTask?.Task.IsCompleted != false)
-				wipTask = new TaskCompletionSource<bool>();
+				wipTask = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
 			if(!inited && (inited = true))
-				SongCore.Loader.SongsLoadedEvent += (_, _2) => wipTask.SetResult(true);
+				SongCore.Loader.SongsLoadedEvent += (_, _2) => wipTask.TrySetResult(true);
 
 			return wipTask.Task;
 		}
 
 		public bool GetValueFor(BeatmapLevel level) {
-			var mid = BeatmapsUtil.GetHashOfLevel(level);
-
-			if(mid == null)
-				return false;
-
-			return SongCore.Collections.GetCustomLevelSongData(mid)?
+			return SongCore.Collections.GetCustomLevelSongData(level.levelID)?
 				._difficulties?.Any(x => x.additionalDifficultyData._requirements.Any(x => x.Length != 0)) == true;
 		}
 	}

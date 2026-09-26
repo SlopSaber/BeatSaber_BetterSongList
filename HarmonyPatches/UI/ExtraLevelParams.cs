@@ -21,21 +21,49 @@ namespace BetterSongList.HarmonyPatches.UI {
 
 		static HoverHintController hhc = null;
 		static Sprite favIcon = null;
-		static IEnumerator ProcessFields() {
+		static Task<Sprite> favoriteIconLoad;
+		static Coroutine fieldSetup;
+		static string appliedLeaderboard;
+		static string appliedMiscSetting;
+		static bool waitingForSongDetails;
+
+		static async void SetFavoriteIcon(ImageView icon) {
+			try {
+				if(favIcon == null)
+					favIcon = await (favoriteIconLoad ??= Utilities.LoadSpriteFromAssemblyAsync("BetterSongList.UI.FavoritesIcon.png"));
+				if(icon != null)
+					icon.sprite = favIcon;
+			} catch(Exception ex) {
+				Plugin.Log.Warn($"Loading the favorites icon failed: {ex}");
+			}
+		}
+
+		static async void RefreshAfterSongDetails() {
+			waitingForSongDetails = true;
+			try {
+				if(await SongDetailsUtil.TryGet() != null)
+					UpdateState();
+			} catch(Exception ex) {
+				Plugin.Log.Warn($"Refreshing song details failed: {ex}");
+			} finally {
+				waitingForSongDetails = false;
+			}
+		}
+
+		static IEnumerator ProcessFields(TextMeshProUGUI[] viewFields) {
 			//Need to wait until the end of frame for reasons beyond my understanding
 			yield return new WaitForEndOfFrame();
+			fieldSetup = null;
+			if(extraUI == null || viewFields != fields)
+				yield break;
+			var leaderboard = Config.Instance.PreferredLeaderboard;
+			var miscSetting = Config.Instance.PreferredMiscSetting;
 
 			static void ModifyValue(TextMeshProUGUI text, string hoverHint, string iconName) {
 				var icon = text.transform.parent.Find("Icon").GetComponent<ImageView>();
 
 				if(iconName == "Favorites") {
-					if(favIcon != null) {
-						icon.sprite = favIcon;
-					} else {
-						Utilities.LoadSpriteFromAssemblyAsync("BetterSongList.UI.FavoritesIcon.png").ContinueWith(x => {
-							icon.sprite = favIcon = x.Result;
-						}, TaskScheduler.FromCurrentSynchronizationContext());
-					}
+					SetFavoriteIcon(icon);
 				} else {
 					icon.SetImageAsync($"#{iconName}Icon");
 				}
@@ -54,30 +82,32 @@ namespace BetterSongList.HarmonyPatches.UI {
 				hhint.text = hoverHint;
 			}
 
-			if(Config.Instance.PreferredLeaderboard == "ScoreSaber") {
+			if(leaderboard == "ScoreSaber") {
 				ModifyValue(fields[0], "ScoreSaber PP Value", "Difficulty");
 			} else {
-				if(Config.Instance.PreferredLeaderboard == "BeatLeader")
+				if(leaderboard == "BeatLeader")
 					ModifyValue(fields[0], "BeatLeader PP Value", "Difficulty");
 			}
-			if(Config.Instance.PreferredLeaderboard == "ScoreSaber") {
+			if(leaderboard == "ScoreSaber") {
 				ModifyValue(fields[1], "ScoreSaber Star Rating", "Favorites");
 			} else {
-				if(Config.Instance.PreferredLeaderboard == "BeatLeader")
+				if(leaderboard == "BeatLeader")
 					ModifyValue(fields[1], "BeatLeader Star Rating", "Favorites");
 			}
-			if(Config.Instance.PreferredMiscSetting == "Reaction Time") {
+			if(miscSetting == "Reaction Time") {
 				ModifyValue(fields[2], "RT (Reaction Time)", "Clock");
-			} else if(Config.Instance.PreferredMiscSetting == "Jump Distance") {
+			} else if(miscSetting == "Jump Distance") {
 				ModifyValue(fields[2], "JD (Jump Distance)", "Measure");
 			} else {
-				if(Config.Instance.PreferredMiscSetting == "Map Age")
+				if(miscSetting == "Map Age")
 					ModifyValue(fields[2], "BeatSaver upload age (Months)", "Clock");
 			}
 			ModifyValue(fields[3], "NJS (Note Jump Speed)", "FastNotes");
 
 			fields[0].richText = true;
 			fields[0].characterSpacing = -3f;
+			appliedLeaderboard = leaderboard;
+			appliedMiscSetting = miscSetting;
 		}
 
 		static StandardLevelDetailView lastInstance = null;
@@ -99,7 +129,10 @@ namespace BetterSongList.HarmonyPatches.UI {
 				extraUI.transform.localPosition -= new Vector3(0, 1f);
 
 				fields = extraUI.GetComponentsInChildren<CurvedTextMeshPro>();
-				SharedCoroutineStarter.instance.StartCoroutine(ProcessFields());
+				appliedLeaderboard = appliedMiscSetting = null;
+				if(fieldSetup != null)
+					SharedCoroutineStarter.instance.StopCoroutine(fieldSetup);
+				fieldSetup = null;
 			}
 
 			lastInstance = __instance;
@@ -163,16 +196,13 @@ namespace BetterSongList.HarmonyPatches.UI {
 						fields[3].text = njs.ToString("0.0#");
 					}
 					wrapper();
-					// This might end up Double-Initing SongDetails but SongDetails handles that internally and only does it once so whatever
-				} else if(!SongDetailsUtil.finishedInitAttempt) {
-					SongDetailsUtil.TryGet().ContinueWith(
-						x => { if(x.Result != null) UpdateState(); },
-						CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.FromCurrentSynchronizationContext()
-					);
+				} else if(!SongDetailsUtil.finishedInitAttempt && !waitingForSongDetails) {
+					RefreshAfterSongDetails();
 				}
 
-				// Basegame maps have no NJS or JD
-				SharedCoroutineStarter.instance.StartCoroutine(ProcessFields());
+				if(fieldSetup == null && (appliedLeaderboard != Config.Instance.PreferredLeaderboard ||
+					appliedMiscSetting != Config.Instance.PreferredMiscSetting))
+					fieldSetup = SharedCoroutineStarter.instance.StartCoroutine(ProcessFields(fields));
 			}
 		}
 	}

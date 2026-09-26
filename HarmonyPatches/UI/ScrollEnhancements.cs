@@ -13,6 +13,7 @@ namespace BetterSongList.HarmonyPatches.UI {
 	[HarmonyPatch(typeof(LevelCollectionTableView), nameof(LevelCollectionTableView.Init), new Type[] { })]
 	static class ScrollEnhancements {
 		static GameObject[] buttons = null;
+		static Task<Sprite> arrowIcon;
 		static void Prefix(LevelCollectionTableView __instance) {
 			if(!__instance._isInitialized)
 				SharedCoroutineStarter.instance.StartCoroutine(DoTheFunny(__instance._tableView, __instance.transform));
@@ -58,6 +59,8 @@ namespace BetterSongList.HarmonyPatches.UI {
 		static IEnumerator DoTheFunny(TableView table, Transform a) {
 			//yield return new WaitForSeconds(2f);
 			yield return new WaitForEndOfFrame();
+			if(table == null || a == null)
+				yield break;
 
 			// Add more horizontal space to the the LevelCollecionViewController
 			var r = (RectTransform)table.transform.parent.parent;
@@ -95,10 +98,20 @@ namespace BetterSongList.HarmonyPatches.UI {
 				btnDownFast
 			}.Select(x => x.gameObject).ToArray();
 
-			Utilities.LoadSpriteFromAssemblyAsync("BetterSongList.UI.DoubleArrowIcon.png").ContinueWith(x => {
-				btnUpFast.GetComponentInChildren<ImageView>().sprite = x.Result;
-				btnDownFast.GetComponentInChildren<ImageView>().sprite = x.Result;
-			}, TaskScheduler.FromCurrentSynchronizationContext());
+			UpdateState();
+			SetArrowIcons(btnUpFast, btnDownFast);
+		}
+
+		static async void SetArrowIcons(Transform up, Transform down) {
+			try {
+				var sprite = await (arrowIcon ??= Utilities.LoadSpriteFromAssemblyAsync("BetterSongList.UI.DoubleArrowIcon.png"));
+				if(up != null)
+					up.GetComponentInChildren<ImageView>().sprite = sprite;
+				if(down != null)
+					down.GetComponentInChildren<ImageView>().sprite = sprite;
+			} catch(Exception ex) {
+				Plugin.Log.Warn($"Loading the scroll icon failed: {ex}");
+			}
 		}
 	}
 }

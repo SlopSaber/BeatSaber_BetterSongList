@@ -1,4 +1,4 @@
-﻿using BetterSongList.FilterModels;
+using BetterSongList.FilterModels;
 using BetterSongList.SortModels;
 using BetterSongList.UI;
 using BetterSongList.Util;
@@ -10,11 +10,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using TMPro;
 using UnityEngine;
 
 namespace BetterSongList.HarmonyPatches {
-	// The main class that handles the modification of the data in the song list
 	[HarmonyPatch(typeof(LevelCollectionTableView), nameof(LevelCollectionTableView.SetData))]
 #if DEBUG
 	public
@@ -22,240 +20,261 @@ namespace BetterSongList.HarmonyPatches {
 	static class HookLevelCollectionTableSet {
 		public static ISorter sorter;
 		public static IFilter filter;
-
 		public static IReadOnlyList<BeatmapLevel> lastInMapList { get; private set; }
 		public static IReadOnlyList<BeatmapLevel> lastOutMapList { get; private set; }
-		static Action<IReadOnlyList<BeatmapLevel>> recallLast = null;
+		static LevelCollectionTableView lastTable;
+		static Action<IReadOnlyList<BeatmapLevel>> recallLast;
+		static readonly SemaphoreSlim processingSlot = new SemaphoreSlim(1, 1);
+		static CancellationTokenSource refreshSource;
+		static bool refreshOnEnable;
+		static bool tryReselectLastSelectedLevel;
+		static ProcessedList asyncPreprocessed;
+		static KeyValuePair<string, int>[] customLegend;
 
+		sealed class ProcessedList {
+			public IReadOnlyList<BeatmapLevel> levels;
+			public KeyValuePair<string, int>[] legend;
+		}
 
-		static IReadOnlyList<BeatmapLevel> asyncPreprocessed;
-
-		static bool tryReselectLastSelectedLevel = false;
-
-		/// <summary>
-		/// Refresh the SongList with the last used BeatMaps array
-		/// </summary>
-		/// <param name="processAsync"></param>
+		/// <summary>Refresh the song list using the last input collection.</summary>
 		public static void Refresh(bool processAsync = false, bool clearAsyncResult = true) {
-			if(lastInMapList == null)
+			if(lastInMapList == null || lastTable == null)
 				return;
-#if TRACE
-			Plugin.Log.Debug(string.Format("Refresh({0})", processAsync));
-#endif
-			/*
-			 * This probably has problems in regards to race conditions / thread safety... We will see...
-			 * Pre-processes the desired songlist state in a second thread - This will then get stored in
-			 * a vaiable and used as the result on the next SetData() in the Prefix hook below
-			 */
+
 			if(clearAsyncResult)
-				asyncPreprocessed = null;
+				CancelRefresh();
 			if(processAsync) {
-				PrepareStuffIfNecessary(async () => {
-					// TODO: Maybe cancellationsource etc
-					var inList = lastInMapList;
-					await Task.Run(() => FilterWrapper(ref inList));
-					asyncPreprocessed = inList;
-					Refresh(false, false);
-				}, true);
+				if(!lastTable.isActiveAndEnabled) {
+					refreshOnEnable = true;
+					return;
+				}
+				RefreshAsync();
 				return;
 			}
 
-			var ml = lastInMapList;
-			/*
-			 * Forcing a refresh of the table by skipping the optimization check in the SetData():Prefix
-			 * because Refresh() is only called in situations where the result will probably change
-			 */
+			var levels = lastInMapList;
 			lastInMapList = null;
-			recallLast(ml);
+			recallLast(levels);
 		}
 
-		static void FilterWrapper(ref IReadOnlyList<BeatmapLevel> previewBeatmapLevels) {
-			if(filter?.isReady != true && sorter?.isReady != true)
-				return;
+		static void SetLoading(bool loading) =>
+			XD.FunnyNull(FilterUI.persistentNuts._filterLoadingIndicator)?.gameObject.SetActive(loading);
 
-#if TRACE
-			Plugin.Log.Info(string.Format("FilterWrapper() - Main thread: {0}", IPA.Utilities.UnityGame.OnMainThread));
-#endif
+		static void CancelRefresh() {
+			var previous = refreshSource;
+			refreshSource = null;
+			asyncPreprocessed = null;
+			previous?.Cancel();
+			SetLoading(false);
+		}
 
+		static async void RefreshAsync() {
+			refreshOnEnable = false;
+			var source = refreshSource = new CancellationTokenSource();
+			var token = source.Token;
+			var table = lastTable;
+			var input = lastInMapList;
+			var selectedFilter = filter;
+			var selectedSorter = sorter;
+			var ascending = Config.Instance.SortAsc;
+			var buildLegend = Config.Instance.EnableAlphabetScrollbar;
+			SetLoading(true);
 			try {
-#if DEBUG
-				var sw = new System.Diagnostics.Stopwatch();
-				sw.Start();
-#endif
-
-				var outV = previewBeatmapLevels.AsEnumerable();
-
-				if(filter?.isReady == true) {
-					outV = outV.Where(filter.GetValueFor);
-
-#if DEBUG
-					Plugin.Log.Info(string.Format("Filtering with {0} took {1}ms and yielded {2} levels", filter, sw.Elapsed.TotalMilliseconds, outV.Count()));
-#endif
+				// Let the current SetData call finish before publishing any completed work.
+				await Task.Yield();
+				token.ThrowIfCancellationRequested();
+				var preparation = Task.WhenAll(
+					selectedSorter?.isReady == false ? selectedSorter.Prepare(token) : Task.CompletedTask,
+					selectedFilter?.isReady == false ? selectedFilter.Prepare(token) : Task.CompletedTask);
+				await AwaitPreparation(preparation, token);
+				await processingSlot.WaitAsync(token);
+				ProcessedList result;
+				try {
+					token.ThrowIfCancellationRequested();
+					var snapshot = input.ToArray();
+					result = await Task.Run(() => Process(snapshot, selectedFilter, selectedSorter, ascending, buildLegend, token), token);
+				} finally {
+					processingSlot.Release();
 				}
 
-				if(sorter?.isReady == true) {
-#if DEBUG
-					sw.Restart();
-#endif
-					if(sorter is ISorterCustom customSorter) {
-						customSorter.DoSort(ref outV, Config.Instance.SortAsc);
-					} else {
-						var pSorter = (ISorterPrimitive)sorter;
-						outV = Config.Instance.SortAsc ?
-							outV.OrderBy(x => pSorter.GetValueFor(x) ?? float.MaxValue) :
-							outV.OrderByDescending(x => pSorter.GetValueFor(x) ?? float.MinValue);
-					}
-#if DEBUG
-					Plugin.Log.Info(string.Format("Sorting with {0} took {1}ms", sorter, sw.Elapsed.TotalMilliseconds));
-#endif
-				}
+				// A later selection or a disabled/destroyed menu must never receive this result.
+				if(token.IsCancellationRequested || refreshSource != source || table == null ||
+					!table.isActiveAndEnabled || table != lastTable || input != lastInMapList)
+					return;
 
-				var beatmapLevels = outV.ToArray();
-				previewBeatmapLevels = beatmapLevels;
-
-				if(sorter is ISorterWithLegend sl && Config.Instance.EnableAlphabetScrollbar)
-					customLegend = sl.BuildLegend(beatmapLevels).ToArray();
+				asyncPreprocessed = result;
+				Refresh(false, false);
+			} catch(OperationCanceledException) when(token.IsCancellationRequested) {
 			} catch(Exception ex) {
-				Plugin.Log.Warn(string.Format("FilterWrapper() Exception: {0}", ex));
+				Plugin.Log.Warn($"Refreshing the song list failed: {ex}");
+			} finally {
+				if(refreshSource == source) {
+					refreshSource = null;
+					SetLoading(false);
+				}
+				source.Dispose();
 			}
 		}
 
-		static CancellationTokenSource sortCancelSrc;
-
-		static bool PrepareStuffIfNecessary(Action cb = null, bool cbOnAlreadyPrepared = false) {
-			if(sorter?.isReady == false || filter?.isReady == false) {
-#if TRACE
-				Plugin.Log.Debug("PrepareStuffIfNecessary()->Prepare");
-#endif
-				XD.FunnyNull(FilterUI.persistentNuts._filterLoadingIndicator)?.gameObject.SetActive(true);
-				sortCancelSrc?.Cancel();
-				var thisSrc = sortCancelSrc = new CancellationTokenSource();
-
-				Task.WhenAll(new[] {
-					sorter?.isReady == false ? sorter.Prepare(thisSrc.Token) : Task.CompletedTask,
-					filter?.isReady == false ? filter.Prepare(thisSrc.Token) : Task.CompletedTask
-				}).ContinueWith(x => {
-#if TRACE
-					Plugin.Log.Debug("PrepareStuffIfNecessary()->ContinueWith");
-#endif
-					if(sortCancelSrc != thisSrc)
-						return;
-
-					sortCancelSrc = null;
-
-					if(!thisSrc.IsCancellationRequested && cb != null)
-						cb();
-				}, CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.FromCurrentSynchronizationContext());
-
-				return true;
+		static async Task AwaitPreparation(Task preparation, CancellationToken token) {
+			// Some shared providers ignore cancellation. Release this request while their cache finishes.
+			var canceled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+			using(token.Register(() => canceled.TrySetResult(true))) {
+				if(await Task.WhenAny(preparation, canceled.Task) != preparation) {
+					_ = preparation.ContinueWith(task => { _ = task.Exception; }, CancellationToken.None,
+						TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+					token.ThrowIfCancellationRequested();
+				}
+				await preparation;
+				token.ThrowIfCancellationRequested();
 			}
-			if(cbOnAlreadyPrepared && cb != null)
-				cb();
-			return false;
+		}
+
+		static ProcessedList Process(IReadOnlyList<BeatmapLevel> input, IFilter selectedFilter,
+			ISorter selectedSorter, bool ascending, bool buildLegend, CancellationToken token) {
+			var result = new ProcessedList { levels = input };
+			if(selectedFilter?.isReady != true && selectedSorter?.isReady != true)
+				return result;
+			try {
+				var levels = input.Where(level => {
+					token.ThrowIfCancellationRequested();
+					return true;
+				});
+				if(selectedFilter?.isReady == true)
+					levels = levels.Where(selectedFilter.GetValueFor);
+				if(selectedSorter?.isReady == true) {
+					if(selectedSorter is ISorterCustom customSorter) {
+						customSorter.DoSort(ref levels, ascending);
+					} else {
+						var primitive = (ISorterPrimitive)selectedSorter;
+						float? GetValue(BeatmapLevel level) {
+							token.ThrowIfCancellationRequested();
+							return primitive.GetValueFor(level);
+						}
+						levels = ascending
+							? levels.OrderBy(level => GetValue(level) ?? float.MaxValue)
+							: levels.OrderByDescending(level => GetValue(level) ?? float.MinValue);
+					}
+				}
+				var processed = levels.ToArray();
+				token.ThrowIfCancellationRequested();
+				result.levels = processed;
+				if(selectedSorter?.isReady == true && selectedSorter is ISorterWithLegend legendSorter && buildLegend)
+					result.legend = legendSorter.BuildLegend(processed)?.ToArray();
+				token.ThrowIfCancellationRequested();
+			} catch(OperationCanceledException) when(token.IsCancellationRequested) {
+				throw;
+			} catch(Exception ex) {
+				Plugin.Log.Warn($"Filtering or sorting the song list failed: {ex}");
+			}
+			return result;
 		}
 
 		[HarmonyPriority(int.MaxValue)]
-		static void Prefix(LevelCollectionTableView __instance, ref IReadOnlyList<BeatmapLevel> beatmapLevels, HashSet<string> favoriteLevelIds, ref bool beatmapLevelsAreSorted, bool sortBeatmapLevels) {
-#if TRACE
-			Plugin.Log.Debug("LevelCollectionTableView.SetData():Prefix");
-#endif
-			// If SetData is called with the literal same maplist as before we might as well ignore it
-			if(beatmapLevels == lastInMapList) {
-#if TRACE
-				Plugin.Log.Debug("LevelCollectionTableView.SetData():Prefix => beatmapLevels == lastInMapList");
-#endif
+		static void Prefix(LevelCollectionTableView __instance, ref IReadOnlyList<BeatmapLevel> beatmapLevels,
+			HashSet<string> favoriteLevelIds, ref bool beatmapLevelsAreSorted, bool sortBeatmapLevels) {
+			// Keep playlist wrappers so duplicate entries retain their identity.
+			if(HookSelectedCollection.lastSelectedCollection != null && PlaylistsUtil.hasPlaylistLib)
+				beatmapLevels = PlaylistsUtil.GetLevelsForLevelCollection(HookSelectedCollection.lastSelectedCollection) ?? beatmapLevels;
+
+			var sameInput = __instance == lastTable && beatmapLevels == lastInMapList;
+			var preprocessed = asyncPreprocessed;
+			if(!sameInput && preprocessed == null)
+				CancelRefresh();
+
+			lastTable = __instance;
+			lastInMapList = beatmapLevels;
+			var originallySorted = beatmapLevelsAreSorted;
+			recallLast = levels => {
+				if(__instance == null)
+					return;
+				tryReselectLastSelectedLevel = true;
+				__instance.SetData(levels, favoriteLevelIds, originallySorted, sortBeatmapLevels);
+			};
+
+			if(sorter?.isReady == true)
+				beatmapLevelsAreSorted = false;
+			if(sameInput && lastOutMapList != null) {
 				beatmapLevels = lastOutMapList;
 				return;
 			}
 
-			// Playlistlib has its own custom wrapping class for Playlists so it can properly track duplicates, so we need to use its collection
-			if(HookSelectedCollection.lastSelectedCollection != null && PlaylistsUtil.hasPlaylistLib)
-				beatmapLevels = PlaylistsUtil.GetLevelsForLevelCollection(HookSelectedCollection.lastSelectedCollection) ?? beatmapLevels;
-
-#if TRACE
-			Plugin.Log.Info(string.Format("LevelCollectionTableView.SetData():Prefix => beatmapLevels.Count: {0}", beatmapLevels.Count));
-#endif
-			lastInMapList = beatmapLevels;
-			var _isSorted = beatmapLevelsAreSorted;
-			recallLast = (overrideData) => {
-				tryReselectLastSelectedLevel = true;
-
-				__instance.SetData(overrideData ?? lastInMapList, favoriteLevelIds, _isSorted, sortBeatmapLevels);
-			};
-
-			//Console.WriteLine("=> {0}", new System.Diagnostics.StackTrace().ToString());
-
-			// If this is true the default Alphabet scrollbar is processed / shown - We dont want that when we use a custom filter
-			if(sorter?.isReady == true)
-				beatmapLevelsAreSorted = false;
-
-			if(PrepareStuffIfNecessary(() => Refresh(true))) {
-				Plugin.Log.Debug(string.Format("Stuff isnt ready yet... Preparing it and then reloading list: Sorter {0}, Filter {1}", sorter?.isReady, filter?.isReady));
-			}
-
-			XD.FunnyNull(FilterUI.persistentNuts._filterLoadingIndicator)?.gameObject.SetActive(false);
-
-			if(asyncPreprocessed != null) {
-				beatmapLevels = asyncPreprocessed;
+			if(preprocessed != null) {
 				asyncPreprocessed = null;
-#if TRACE
-				Plugin.Log.Notice("Used Async-Prefiltered");
-#endif
+				beatmapLevels = preprocessed.levels;
+				customLegend = preprocessed.legend;
 				return;
 			}
 
-			// Passing these explicitly for thread safety
-			FilterWrapper(ref beatmapLevels);
+			if(sorter?.isReady == false || filter?.isReady == false)
+				Refresh(true);
+			var result = Process(beatmapLevels, filter, sorter, Config.Instance.SortAsc,
+				Config.Instance.EnableAlphabetScrollbar, CancellationToken.None);
+			beatmapLevels = result.levels;
+			customLegend = result.legend;
 		}
 
-		static IEnumerator TryReselectLastSelectedSong(LevelCollectionTableView __instance) {
+		internal static void Suspend(LevelCollectionTableView table) {
+			if(table != lastTable)
+				return;
+			refreshOnEnable |= refreshSource != null;
+			CancelRefresh();
+		}
+
+		internal static void Resume(LevelCollectionTableView table) {
+			if(table == lastTable && refreshOnEnable) {
+				refreshOnEnable = false;
+				Refresh(true);
+			}
+		}
+
+		internal static void Release(LevelCollectionTableView table) {
+			if(table != lastTable)
+				return;
+			CancelRefresh();
+			lastTable = null;
+			lastInMapList = lastOutMapList = null;
+			recallLast = null;
+			customLegend = null;
+			refreshOnEnable = false;
+		}
+
+		static IEnumerator TryReselectLastSelectedSong(LevelCollectionTableView table) {
 			yield return null;
-
-			if(__instance == null || (lastOutMapList?.Count ?? 0) == 0)
+			if(table == null || !table.isActiveAndEnabled || table != lastTable || (lastOutMapList?.Count ?? 0) == 0)
 				yield break;
-
-			var idx = Math.Max(0, lastOutMapList.FindIndex(x => x.levelID == Config.Instance.LastSong) + (__instance._showLevelPackHeader ? 1 : 0));
-
-			Plugin.Log.Debug(string.Format("LevelCollectionTableView.SetData():Postfix => TryReselectLastSelectedSong: Scrolling to song with idx {0}", idx));
-
-			__instance._selectedRow = idx;
-			__instance._tableView.SelectCellWithIdx(idx, false);
-			__instance._tableView.ScrollToCellWithIdx(idx, TableView.ScrollPositionType.Center, false);
+			var index = Math.Max(0, lastOutMapList.FindIndex(level => level.levelID == Config.Instance.LastSong) + (table._showLevelPackHeader ? 1 : 0));
+			table._selectedRow = index;
+			table._tableView.SelectCellWithIdx(index, false);
+			table._tableView.ScrollToCellWithIdx(index, TableView.ScrollPositionType.Center, false);
 		}
 
-		static KeyValuePair<string, int>[] customLegend = null;
 		static void Postfix(LevelCollectionTableView __instance, IReadOnlyList<BeatmapLevel> beatmapLevels) {
 			lastOutMapList = beatmapLevels;
-
 			if(tryReselectLastSelectedLevel) {
 				SharedCoroutineStarter.instance.StartCoroutine(TryReselectLastSelectedSong(__instance));
 				tryReselectLastSelectedLevel = false;
 			}
-
-			// Basegame already handles cleaning up the legend etc
 			if(customLegend == null || customLegend.Length == 0) {
-				// TODO: Base game issue. Remove when fixed.
 				if(beatmapLevels.Count == 0)
-                	__instance._alphabetScrollbar.gameObject.SetActive(false);
-                return;
+					__instance._alphabetScrollbar.gameObject.SetActive(false);
+				return;
 			}
-
-			/*
-			 * We essentially gotta double-init the alphabet scrollbar because basegame
-			 * made the great decision to unnecessarily lock down the scrollbar to only
-			 * use characters, not strings
-			 */
-			__instance._alphabetScrollbar.SetData(customLegend.Select(x => new AlphabetScrollInfo.Data('?', x.Value)).ToArray());
-
-			// Now that all labels are there we can insert the text we want there...
+			__instance._alphabetScrollbar.SetData(customLegend.Select(entry => new AlphabetScrollInfo.Data('?', entry.Value)).ToArray());
 			for(var i = customLegend.Length; i-- != 0;)
 				__instance._alphabetScrollbar._texts[i].text = customLegend[i].Key;
-
-			customLegend = null;
-
-			// Move the table a bit to the right to accomodate for alphabet scollbar (Basegame behaviour)
 			((RectTransform)__instance._tableView.transform).offsetMin = new Vector2(((RectTransform)__instance._alphabetScrollbar.transform).rect.size.x + 1f, 0f);
 			__instance._alphabetScrollbar.gameObject.SetActive(true);
 		}
+	}
+
+	[HarmonyPatch(typeof(LevelCollectionTableView))]
+	static class HookLevelCollectionTableLifetime {
+		[HarmonyPostfix, HarmonyPatch("OnDisable")]
+		static void OnDisable(LevelCollectionTableView __instance) => HookLevelCollectionTableSet.Suspend(__instance);
+		[HarmonyPostfix, HarmonyPatch("OnEnable")]
+		static void OnEnable(LevelCollectionTableView __instance) => HookLevelCollectionTableSet.Resume(__instance);
+		[HarmonyPostfix, HarmonyPatch("OnDestroy")]
+		static void OnDestroy(LevelCollectionTableView __instance) => HookLevelCollectionTableSet.Release(__instance);
 	}
 }

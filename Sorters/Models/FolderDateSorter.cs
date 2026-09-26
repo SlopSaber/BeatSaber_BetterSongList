@@ -1,4 +1,4 @@
-﻿using BetterSongList.Util;
+using BetterSongList.Util;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -26,51 +26,50 @@ namespace BetterSongList.SortModels {
 				SongCore.Loader.SongsLoadedEvent += (_, _2) => Prepare(false);
 			}
 
-			wipTask ??= new TaskCompletionSource<bool>();
-
-			if(!SongCore.Loader.AreSongsLoaded || SongCore.Loader.AreSongsLoading)
-				return wipTask.Task;
-
-			if(!isLoading) {
+			var completion = wipTask ??= new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+			if(SongCore.Loader.AreSongsLoaded && !SongCore.Loader.AreSongsLoading && !isLoading) {
 				isLoading = true;
-				Task.Run(() => {
-					var xy = new System.Diagnostics.Stopwatch();
-					xy.Start();
-
-					var fpath = Path.DirectorySeparatorChar + "info.dat";
-
-					foreach(var song in
-						SongCore.Loader.BeatmapLevelsModelSO
-						._customLevelsRepository?.beatmapLevelPacks.Where(x => x is SongCore.OverrideClasses.SongCoreCustomBeatmapLevelPack)
-						.SelectMany(x => x.AllBeatmapLevels()) ?? new List<BeatmapLevel>()
-					) {
-						if(songTimes.ContainsKey(song.levelID) && !fullReload)
-							continue;
-
-						var levelFolderPath = SongCore.Loader.CustomLevelLoader._loadedBeatmapSaveData.TryGetValue(song.levelID, out var saveData)
-							? saveData.customLevelFolderInfo.folderPath
-							: null;
-
-						if(string.IsNullOrEmpty(levelFolderPath))
-							continue;
-
-						/*
-						 * There isnt really any "good" setup - LastWriteTime is cloned when copying a file and retained when manually
-						 * extracing from a zip, but the createtime is obviously "reset" when you copy files
-						 */
-						songTimes[song.levelID] = (int)File.GetCreationTimeUtc(levelFolderPath + fpath).ToUnixTime();
-					}
-
-					Plugin.Log.Debug(string.Format("Getting SongFolder dates took {0}ms", xy.ElapsedMilliseconds));
-					wipTask.TrySetResult(true);
-					wipTask = null;
-					isLoading = false;
-				});
+				LoadDates(completion, fullReload);
 			}
-
-			return wipTask.Task;
+			return completion.Task;
 		}
 
+		static async void LoadDates(TaskCompletionSource<bool> completion, bool fullReload) {
+			try {
+				// Read Unity-owned repositories on the main thread; only filesystem work runs in the worker.
+				var paths = new List<KeyValuePair<string, string>>();
+				var repository = SongCore.Loader.BeatmapLevelsModelSO._customLevelsRepository;
+				if(repository != null) {
+					foreach(var pack in repository.beatmapLevelPacks) {
+						if(!(pack is SongCore.OverrideClasses.SongCoreCustomBeatmapLevelPack))
+							continue;
+						foreach(var song in pack.AllBeatmapLevels()) {
+							if(!fullReload && songTimes.ContainsKey(song.levelID))
+								continue;
+							if(SongCore.Loader.CustomLevelLoader._loadedBeatmapSaveData.TryGetValue(song.levelID, out var saveData)) {
+								var folder = saveData.customLevelFolderInfo.folderPath;
+								if(!string.IsNullOrEmpty(folder))
+									paths.Add(new KeyValuePair<string, string>(song.levelID, Path.Combine(folder, "info.dat")));
+							}
+						}
+					}
+				}
+				await Task.Run(() => {
+					foreach(var entry in paths) {
+						try {
+							songTimes[entry.Key] = (int)File.GetCreationTimeUtc(entry.Value).ToUnixTime();
+						} catch(IOException) {
+						} catch(UnauthorizedAccessException) { }
+					}
+				});
+			} catch(Exception ex) {
+				Plugin.Log.Warn($"Getting song folder dates failed: {ex}");
+			} finally {
+				isLoading = false;
+				wipTask = null;
+				completion.TrySetResult(true);
+			}
+		}
 		public float? GetValueFor(BeatmapLevel level) {
 			if(songTimes.TryGetValue(level.levelID, out var oVal))
 				return oVal;
@@ -93,12 +92,9 @@ namespace BetterSongList.SortModels {
 		}
 
 		public IEnumerable<KeyValuePair<string, int>> BuildLegend(BeatmapLevel[] levels) {
-			return SongListLegendBuilder.BuildFor(levels, (level) => {
-				if(!songTimes.ContainsKey(level.levelID))
-					return null;
-
-				return GetMapAgeMonths(songTimes[level.levelID]);
-			});
+			var currentUtc = (int)DateTime.UtcNow.ToUnixTime();
+			return SongListLegendBuilder.BuildFor(levels, level =>
+				songTimes.TryGetValue(level.levelID, out var date) ? GetMapAgeMonths(date, currentUtc) : null);
 		}
 	}
 }

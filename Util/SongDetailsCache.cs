@@ -13,6 +13,8 @@ namespace BetterSongList.Util {
 
 		public static bool finishedInitAttempt { get; private set; } = false;
 		public static bool attemptedToInit { get; private set; } = false;
+		static readonly Hive.Versioning.Version minimumVersion = new Hive.Versioning.Version("1.1.5");
+		static Task<AntiBox> initialization;
 
 		static bool CheckAvailable() {
 			var v = IPA.Loader.PluginManager.GetPluginFromId("SongDetailsCache");
@@ -20,7 +22,7 @@ namespace BetterSongList.Util {
 			if(v == null)
 				return false;
 
-			return v.HVersion >= new Hive.Versioning.Version("1.1.5");
+			return v.HVersion >= minimumVersion;
 		}
 		public static bool isAvailable => CheckAvailable();
 		//public static object instance { get; private set; }
@@ -36,7 +38,9 @@ namespace BetterSongList.Util {
 			return null;
 		}
 
-		public static async Task<AntiBox> TryGet() {
+		public static Task<AntiBox> TryGet() => initialization ??= Initialize();
+
+		static async Task<AntiBox> Initialize() {
 			if(!finishedInitAttempt) {
 				attemptedToInit = true;
 				try {

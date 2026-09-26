@@ -29,12 +29,14 @@ namespace BetterSongList.HarmonyPatches.UI {
 		// Levelnav is kinda too far down in 1.18
 		static IEnumerator FixPos(Transform t) {
 			yield return new WaitForEndOfFrame();
-			t.localPosition = new Vector3(0, -7);
+			if(t != null)
+				t.localPosition = new Vector3(0, -7);
 		}
 
 		static IEnumerator InitDelayed(Transform t) {
 			yield return new WaitForEndOfFrame();
-			FilterUI.AttachTo(t.parent);
+			if(t != null)
+				FilterUI.AttachTo(t.parent);
 		}
 	}
 }

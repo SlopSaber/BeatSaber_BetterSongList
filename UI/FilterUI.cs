@@ -256,10 +256,18 @@ namespace BetterSongList.UI {
 		}
 
 		bool settingsWereOpened = false;
+		Coroutine settingsAttention;
+		static readonly WaitForSeconds attentionInterval = new WaitForSeconds(.5f);
 		BSMLParserParams settingsViewParams = null;
 		void SettingsOpened() {
 			Config.Instance.SettingsSeenInVersion = Assembly.GetExecutingAssembly().GetName().Version.ToString();
 			settingsWereOpened = true;
+			if(settingsAttention != null) {
+				SharedCoroutineStarter.instance.StopCoroutine(settingsAttention);
+				settingsAttention = null;
+			}
+			if(_settingsButton != null)
+				_settingsButton.color = Color.white;
 
 			BSMLStuff.InitSplitView(ref settingsViewParams, rootTransform.gameObject, SplitViews.Settings.instance).EmitEvent("ShowSettings");
 		}
@@ -287,7 +295,9 @@ namespace BetterSongList.UI {
 
 			SetSortDirection(Config.Instance.SortAsc, false);
 
-			SharedCoroutineStarter.instance.StartCoroutine(PossiblyDrawUserAttentionToSettingsButton());
+			if(settingsAttention != null)
+				SharedCoroutineStarter.instance.StopCoroutine(settingsAttention);
+			settingsAttention = SharedCoroutineStarter.instance.StartCoroutine(PossiblyDrawUserAttentionToSettingsButton());
 		}
 
 		IEnumerator PossiblyDrawUserAttentionToSettingsButton() {
@@ -298,14 +308,17 @@ namespace BetterSongList.UI {
 				}
 			} catch { }
 
-			while(!settingsWereOpened) {
-				yield return new WaitForSeconds(.5f);
-				if(_settingsButton != null)
-					_settingsButton.color = Color.green;
+			var button = _settingsButton;
+			while(!settingsWereOpened && button != null) {
+				yield return attentionInterval;
+				if(button == null || settingsWereOpened)
+					yield break;
+				if(button.isActiveAndEnabled)
+					button.color = Color.green;
 
-				yield return new WaitForSeconds(.5f);
-				if(_settingsButton != null)
-					_settingsButton.color = Color.white;
+				yield return attentionInterval;
+				if(button != null && button.isActiveAndEnabled)
+					button.color = Color.white;
 			}
 		}
 
