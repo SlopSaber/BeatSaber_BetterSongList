@@ -1,6 +1,6 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <GameDirectory>D:\BSManager\BSInstances\1.45.1</GameDirectory>
+    <GameDirectory>D:\BSManager\BSInstances\1.45.2</GameDirectory>
     <TargetFramework>net48</TargetFramework>
     <OutputType>Library</OutputType>
     <LangVersion>8</LangVersion>
