@@ -23,6 +23,8 @@ namespace BetterSongList.HarmonyPatches {
 		public static IReadOnlyList<BeatmapLevel> lastInMapList { get; private set; }
 		public static IReadOnlyList<BeatmapLevel> lastOutMapList { get; private set; }
 		static LevelCollectionTableView lastTable;
+		static bool lastLevelsWereSorted;
+		static bool lastSortBeatmapLevels;
 		static Action<IReadOnlyList<BeatmapLevel>> recallLast;
 		static readonly SemaphoreSlim processingSlot = new SemaphoreSlim(1, 1);
 		static CancellationTokenSource refreshSource;
@@ -30,10 +32,14 @@ namespace BetterSongList.HarmonyPatches {
 		static bool tryReselectLastSelectedLevel;
 		static ProcessedList asyncPreprocessed;
 		static KeyValuePair<string, int>[] customLegend;
+		static IReadOnlyList<AlphabetScrollInfo.Data> defaultLegend;
+		static bool defaultLegendPrepared;
 
 		sealed class ProcessedList {
 			public IReadOnlyList<BeatmapLevel> levels;
 			public KeyValuePair<string, int>[] legend;
+			public IReadOnlyList<AlphabetScrollInfo.Data> defaultLegend;
+			public bool defaultLegendPrepared;
 		}
 
 		/// <summary>Refresh the song list using the last input collection.</summary>
@@ -78,6 +84,8 @@ namespace BetterSongList.HarmonyPatches {
 			var selectedSorter = sorter;
 			var ascending = Config.Instance.SortAsc;
 			var buildLegend = Config.Instance.EnableAlphabetScrollbar;
+			var levelsWereSorted = lastLevelsWereSorted;
+			var sortBeatmapLevels = lastSortBeatmapLevels;
 			SetLoading(true);
 			try {
 				// Let the current SetData call finish before publishing any completed work.
@@ -96,7 +104,12 @@ namespace BetterSongList.HarmonyPatches {
 					var preparedFilter = selectedFilter?.isReady == true ? selectedFilter : null;
 					var preparedSorter = CaptureReadySorter(selectedSorter, ascending);
 					var snapshot = input.ToArray();
-					result = await Task.Run(() => Process(snapshot, preparedFilter, preparedSorter, ascending, buildLegend, token), token);
+					result = await Task.Run(() => {
+						var processed = Process(snapshot, preparedFilter, preparedSorter, ascending, buildLegend, token);
+						if(preparedSorter == null && levelsWereSorted)
+							PrepareDefaultLegend(processed, sortBeatmapLevels);
+						return processed;
+					}, token);
 				} finally {
 					processingSlot.Release();
 				}
@@ -106,7 +119,8 @@ namespace BetterSongList.HarmonyPatches {
 				if(token.IsCancellationRequested || refreshSource != source || table == null ||
 					!table.isActiveAndEnabled || table != lastTable || input != lastInMapList ||
 					!ReferenceEquals(selectedFilter, filter) || !ReferenceEquals(selectedSorter, sorter) ||
-					ascending != Config.Instance.SortAsc || buildLegend != Config.Instance.EnableAlphabetScrollbar)
+					ascending != Config.Instance.SortAsc || buildLegend != Config.Instance.EnableAlphabetScrollbar ||
+					levelsWereSorted != lastLevelsWereSorted || sortBeatmapLevels != lastSortBeatmapLevels)
 					return;
 
 				asyncPreprocessed = result;
@@ -129,6 +143,19 @@ namespace BetterSongList.HarmonyPatches {
 				return null;
 			return ReferenceEquals(selectedSorter, SortMethods.stars)
 				? SortMethods.CaptureStarsSorter(ascending) : selectedSorter;
+		}
+
+		static void PrepareDefaultLegend(ProcessedList result, bool sortBeatmapLevels) {
+			try {
+				var legend = AlphabetScrollbarInfoBeatmapLevelHelper.CreateData(result.levels, sortBeatmapLevels,
+					out var sortedLevels);
+				result.levels = sortedLevels;
+				result.defaultLegend = legend;
+				result.defaultLegendPrepared = true;
+			} catch(Exception ex) {
+				// Leave the native SetData fallback available if managed preparation fails.
+				Plugin.Log.Warn($"Preparing the default song alphabet failed: {ex}");
+			}
 		}
 
 		static bool CanProcessColdOnWorker(IFilter selectedFilter, ISorter selectedSorter) {
@@ -215,6 +242,8 @@ namespace BetterSongList.HarmonyPatches {
 			lastTable = __instance;
 			lastInMapList = beatmapLevels;
 			var originallySorted = beatmapLevelsAreSorted;
+			lastLevelsWereSorted = originallySorted;
+			lastSortBeatmapLevels = sortBeatmapLevels;
 			recallLast = levels => {
 				if(__instance == null)
 					return;
@@ -227,6 +256,8 @@ namespace BetterSongList.HarmonyPatches {
 			if(sorterReady)
 				beatmapLevelsAreSorted = false;
 			if(sameInput && lastOutMapList != null) {
+				if(defaultLegendPrepared)
+					beatmapLevelsAreSorted = false;
 				beatmapLevels = lastOutMapList;
 				return;
 			}
@@ -235,18 +266,27 @@ namespace BetterSongList.HarmonyPatches {
 				asyncPreprocessed = null;
 				beatmapLevels = preprocessed.levels;
 				customLegend = preprocessed.legend;
+				defaultLegend = preprocessed.defaultLegend;
+				defaultLegendPrepared = preprocessed.defaultLegendPrepared;
+				if(defaultLegendPrepared)
+					beatmapLevelsAreSorted = false;
 				return;
 			}
 
 			if((sorter != null && !sorterReady) || (filter != null && !filterReady))
 				Refresh(true);
-			if((filter != null || sorter != null) && CanProcessColdOnWorker(filter, sorter)) {
+			if((filter != null || sorter != null || originallySorted) && CanProcessColdOnWorker(filter, sorter)) {
 				customLegend = null;
+				defaultLegend = null;
+				defaultLegendPrepared = false;
+				beatmapLevelsAreSorted = false;
 				if(refreshSource == null)
 					Refresh(true);
 				return;
 			}
 			var ascending = Config.Instance.SortAsc;
+			defaultLegend = null;
+			defaultLegendPrepared = false;
 			var result = Process(beatmapLevels, filterReady ? filter : null,
 				CaptureReadySorter(sorterReady ? sorter : null, ascending), ascending,
 				Config.Instance.EnableAlphabetScrollbar, CancellationToken.None);
@@ -276,6 +316,8 @@ namespace BetterSongList.HarmonyPatches {
 			lastInMapList = lastOutMapList = null;
 			recallLast = null;
 			customLegend = null;
+			defaultLegend = null;
+			defaultLegendPrepared = false;
 			refreshOnEnable = false;
 		}
 
@@ -296,6 +338,13 @@ namespace BetterSongList.HarmonyPatches {
 			if(tryReselectLastSelectedLevel) {
 				SharedCoroutineStarter.instance.StartCoroutine(TryReselectLastSelectedSong(__instance));
 				tryReselectLastSelectedLevel = false;
+			}
+			if(defaultLegendPrepared) {
+				__instance._alphabetScrollbar.SetData(defaultLegend);
+				((RectTransform)__instance._tableView.transform).offsetMin = new Vector2(
+					((RectTransform)__instance._alphabetScrollbar.transform).rect.size.x + 1f, 0f);
+				__instance._alphabetScrollbar.gameObject.SetActive(beatmapLevels.Count != 0);
+				return;
 			}
 			if(customLegend == null || customLegend.Length == 0) {
 				if(beatmapLevels.Count == 0)
