@@ -12,16 +12,10 @@ namespace BetterSongList.FilterModels {
 			intendedPlayedState = !unplayed;
 		}
 
-		public Task Prepare(CancellationToken cancelToken) {
-			var t = new TaskCompletionSource<bool>();
-
-			IPA.Utilities.Async.UnityMainThreadTaskScheduler.Factory.StartNew(() => {
-				try {
-					LocalScoresUtil.Load();
-				} catch { }
-				t.SetResult(true);
-			});
-			return t.Task;
+		public async Task Prepare(CancellationToken cancelToken) {
+			try {
+				await LocalScoresUtil.LoadAsync();
+			} catch { }
 		}
 
 		public string GetUnavailabilityReason() => SongDetailsUtil.GetUnavailabilityReason();
