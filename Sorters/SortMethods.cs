@@ -34,7 +34,9 @@ namespace BetterSongList {
 		);
 		public static readonly ISorter downloadTime = new FolderDateSorter();
 
-		internal static float? StarsProcessor(object xx) {
+		internal static float? StarsProcessor(object xx) => StarsProcessor(xx, Config.Instance.SortAsc);
+
+		static float? StarsProcessor(object xx, bool ascending) {
 			var x = (Song)xx;
 			if(!x.rankedStates.HasFlag(RankedStates.ScoresaberRanked))
 				return null;
@@ -52,7 +54,7 @@ namespace BetterSongList {
 					continue;
 				}
 
-				if(Config.Instance.SortAsc) {
+				if(ascending) {
 					if(ret < diff.stars)
 						continue;
 				} else if(ret > diff.stars) {
@@ -64,6 +66,10 @@ namespace BetterSongList {
 
 			return ret == 0 ? (float?)null : ret;
 		}
+
+		internal static ISorter CaptureStarsSorter(bool ascending) => new BasicSongDetailsSorterWithLegend(
+			x => StarsProcessor(x, ascending),
+			x => StarsProcessor(x, ascending)?.ToString("0.0"));
 
 		public static readonly ISorter stars = new BasicSongDetailsSorterWithLegend(StarsProcessor, x => {
 			var y = StarsProcessor((Song)x);

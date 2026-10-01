@@ -87,19 +87,26 @@ namespace BetterSongList.HarmonyPatches {
 					selectedSorter?.isReady == false ? selectedSorter.Prepare(token) : Task.CompletedTask,
 					selectedFilter?.isReady == false ? selectedFilter.Prepare(token) : Task.CompletedTask);
 				await AwaitPreparation(preparation, token);
+				await IPA.Utilities.UnityGame.SwitchToMainThreadAsync();
 				await processingSlot.WaitAsync(token);
 				ProcessedList result;
 				try {
+					await IPA.Utilities.UnityGame.SwitchToMainThreadAsync();
 					token.ThrowIfCancellationRequested();
+					var preparedFilter = selectedFilter?.isReady == true ? selectedFilter : null;
+					var preparedSorter = CaptureReadySorter(selectedSorter, ascending);
 					var snapshot = input.ToArray();
-					result = await Task.Run(() => Process(snapshot, selectedFilter, selectedSorter, ascending, buildLegend, token), token);
+					result = await Task.Run(() => Process(snapshot, preparedFilter, preparedSorter, ascending, buildLegend, token), token);
 				} finally {
 					processingSlot.Release();
 				}
 
 				// A later selection or a disabled/destroyed menu must never receive this result.
+				await IPA.Utilities.UnityGame.SwitchToMainThreadAsync();
 				if(token.IsCancellationRequested || refreshSource != source || table == null ||
-					!table.isActiveAndEnabled || table != lastTable || input != lastInMapList)
+					!table.isActiveAndEnabled || table != lastTable || input != lastInMapList ||
+					!ReferenceEquals(selectedFilter, filter) || !ReferenceEquals(selectedSorter, sorter) ||
+					ascending != Config.Instance.SortAsc || buildLegend != Config.Instance.EnableAlphabetScrollbar)
 					return;
 
 				asyncPreprocessed = result;
@@ -108,12 +115,35 @@ namespace BetterSongList.HarmonyPatches {
 			} catch(Exception ex) {
 				Plugin.Log.Warn($"Refreshing the song list failed: {ex}");
 			} finally {
+				await IPA.Utilities.UnityGame.SwitchToMainThreadAsync();
 				if(refreshSource == source) {
 					refreshSource = null;
 					SetLoading(false);
 				}
 				source.Dispose();
 			}
+		}
+
+		static ISorter CaptureReadySorter(ISorter selectedSorter, bool ascending) {
+			if(selectedSorter?.isReady != true)
+				return null;
+			return ReferenceEquals(selectedSorter, SortMethods.stars)
+				? SortMethods.CaptureStarsSorter(ascending) : selectedSorter;
+		}
+
+		static bool CanProcessColdOnWorker(IFilter selectedFilter, ISorter selectedSorter) {
+			// New worker requests are limited to built-in callbacks that read managed data.
+			var managedFilter = selectedFilter == null ||
+				ReferenceEquals(selectedFilter, FilterMethods.played) ||
+				ReferenceEquals(selectedFilter, FilterMethods.unplayed) ||
+				ReferenceEquals(selectedFilter, FilterMethods.requirements);
+			var managedSorter = selectedSorter == null ||
+				ReferenceEquals(selectedSorter, SortMethods.alphabeticalSongname) ||
+				ReferenceEquals(selectedSorter, SortMethods.alphabeticalMapper) ||
+				ReferenceEquals(selectedSorter, SortMethods.bpm) ||
+				ReferenceEquals(selectedSorter, SortMethods.songLength) ||
+				ReferenceEquals(selectedSorter, SortMethods.downloadTime);
+			return managedFilter && managedSorter;
 		}
 
 		static async Task AwaitPreparation(Task preparation, CancellationToken token) {
@@ -133,16 +163,16 @@ namespace BetterSongList.HarmonyPatches {
 		static ProcessedList Process(IReadOnlyList<BeatmapLevel> input, IFilter selectedFilter,
 			ISorter selectedSorter, bool ascending, bool buildLegend, CancellationToken token) {
 			var result = new ProcessedList { levels = input };
-			if(selectedFilter?.isReady != true && selectedSorter?.isReady != true)
+			if(selectedFilter == null && selectedSorter == null)
 				return result;
 			try {
 				var levels = input.Where(level => {
 					token.ThrowIfCancellationRequested();
 					return true;
 				});
-				if(selectedFilter?.isReady == true)
+				if(selectedFilter != null)
 					levels = levels.Where(selectedFilter.GetValueFor);
-				if(selectedSorter?.isReady == true) {
+				if(selectedSorter != null) {
 					if(selectedSorter is ISorterCustom customSorter) {
 						customSorter.DoSort(ref levels, ascending);
 					} else {
@@ -159,7 +189,7 @@ namespace BetterSongList.HarmonyPatches {
 				var processed = levels.ToArray();
 				token.ThrowIfCancellationRequested();
 				result.levels = processed;
-				if(selectedSorter?.isReady == true && selectedSorter is ISorterWithLegend legendSorter && buildLegend)
+				if(selectedSorter is ISorterWithLegend legendSorter && buildLegend)
 					result.legend = legendSorter.BuildLegend(processed)?.ToArray();
 				token.ThrowIfCancellationRequested();
 			} catch(OperationCanceledException) when(token.IsCancellationRequested) {
@@ -192,7 +222,9 @@ namespace BetterSongList.HarmonyPatches {
 				__instance.SetData(levels, favoriteLevelIds, originallySorted, sortBeatmapLevels);
 			};
 
-			if(sorter?.isReady == true)
+			var sorterReady = sorter?.isReady == true;
+			var filterReady = filter?.isReady == true;
+			if(sorterReady)
 				beatmapLevelsAreSorted = false;
 			if(sameInput && lastOutMapList != null) {
 				beatmapLevels = lastOutMapList;
@@ -206,9 +238,17 @@ namespace BetterSongList.HarmonyPatches {
 				return;
 			}
 
-			if(sorter?.isReady == false || filter?.isReady == false)
+			if((sorter != null && !sorterReady) || (filter != null && !filterReady))
 				Refresh(true);
-			var result = Process(beatmapLevels, filter, sorter, Config.Instance.SortAsc,
+			if((filter != null || sorter != null) && CanProcessColdOnWorker(filter, sorter)) {
+				customLegend = null;
+				if(refreshSource == null)
+					Refresh(true);
+				return;
+			}
+			var ascending = Config.Instance.SortAsc;
+			var result = Process(beatmapLevels, filterReady ? filter : null,
+				CaptureReadySorter(sorterReady ? sorter : null, ascending), ascending,
 				Config.Instance.EnableAlphabetScrollbar, CancellationToken.None);
 			beatmapLevels = result.levels;
 			customLegend = result.legend;
@@ -238,6 +278,8 @@ namespace BetterSongList.HarmonyPatches {
 			customLegend = null;
 			refreshOnEnable = false;
 		}
+
+		internal static void Stop() => Release(lastTable);
 
 		static IEnumerator TryReselectLastSelectedSong(LevelCollectionTableView table) {
 			yield return null;
