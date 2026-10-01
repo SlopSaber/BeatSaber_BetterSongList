@@ -5,6 +5,7 @@ namespace BetterSongList.HarmonyPatches {
 	static class HookSelectedInTable {
 		[HarmonyPriority(int.MinValue)]
 		static void Postfix(LevelCollectionTableView __instance) {
+			PackPreselect.LevelSelected(__instance);
 			Config.Instance.LastSong = __instance._selectedBeatmapLevel?.levelID;
 
 #if TRACE

@@ -11,6 +11,7 @@ namespace BetterSongList.HarmonyPatches {
 		// When switching categories we want to reset the table to the topp
 		[HarmonyPriority(int.MinValue)]
 		static void Prefix(SelectLevelCategoryViewController __instance) {
+			PackPreselect.CategorySelected(__instance);
 #if TRACE
 			Plugin.Log.Debug("SelectLevelCategoryViewController.LevelFilterCategoryIconSegmentedControlDidSelectCell():Prefix");
 #endif

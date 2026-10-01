@@ -8,8 +8,8 @@ namespace BetterSongList.HarmonyPatches {
 		public static bool doRestoreFilter = false;
 
 		[HarmonyPriority(int.MinValue), HarmonyPrefix]
-		static void CollectionSet(BeatmapLevelPack beatmapLevelCollection) {
-			if(beatmapLevelCollection != null) {
+		static void CollectionSet(BeatmapLevelPack beatmapLevelCollection, AnnotatedBeatmapLevelCollectionsViewController __instance = null) {
+			if(beatmapLevelCollection != null && !PackPreselect.KeepPendingPackName(__instance)) {
 				// Save the collection we're on for reselection purposes
 				Config.Instance.LastPack = beatmapLevelCollection.packName ?? "";
 			}

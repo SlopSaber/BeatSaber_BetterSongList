@@ -12,6 +12,31 @@ namespace BetterSongList.Util {
 
 		public static Dictionary<string, BeatmapLevelPack> packs = null;
 
+		internal static BeatmapLevelPack GetAvailablePack(string packName, IReadOnlyList<BeatmapLevelPack> availablePacks) {
+			if(packName == null)
+				return null;
+			if(packs != null && packs.TryGetValue(packName, out var cached))
+				return cached;
+			if(availablePacks == null)
+				return null;
+
+			for(var i = 0; i < availablePacks.Count; ++i) {
+				var pack = availablePacks[i];
+				if(pack.shortPackName == packName)
+					return pack;
+			}
+			return hasPlaylistLib ? GetAvailablePlaylistPack(packName, availablePacks) : null;
+		}
+
+		static BeatmapLevelPack GetAvailablePlaylistPack(string packName, IReadOnlyList<BeatmapLevelPack> availablePacks) {
+			for(var i = 0; i < availablePacks.Count; ++i) {
+				var pack = availablePacks[i];
+				if(pack is PlaylistLevelPack && pack.packName == packName)
+					return pack;
+			}
+			return null;
+		}
+
 		public static BeatmapLevelPack GetPack(string packName) {
 			if(packName == null)
 				return null;
