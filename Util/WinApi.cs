@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Runtime.InteropServices;
+using System.IO;
 
 namespace BetterSongList.Util {
 	static class WinApi {
@@ -34,7 +35,11 @@ namespace BetterSongList.Util {
             if(recycle)
                 fileop.fFlags |= FOF_ALLOWUNDO;
 
-            SHFileOperation(ref fileop);
+            var result = SHFileOperation(ref fileop);
+            if(fileop.fAnyOperationsAborted)
+                throw new OperationCanceledException("Map recycling was cancelled.");
+            if(result != 0)
+                throw new IOException($"Shell file deletion failed ({result}).");
         }
     }
 }

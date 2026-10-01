@@ -33,6 +33,7 @@ namespace BetterSongList {
 
 		[OnExit]
 		public void OnApplicationQuit() {
+			HarmonyPatches.UI.SongDeleteButton.Stop();
 			LocalScoresUtil.Stop();
 			HarmonyPatches.HookLevelCollectionTableSet.Stop();
 			harmony.UnpatchSelf();
