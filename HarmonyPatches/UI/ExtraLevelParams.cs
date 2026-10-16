@@ -178,7 +178,11 @@ namespace BetterSongList.HarmonyPatches.UI {
 							}
 						}
 
+#if BEAT_SABER_1453
+						var basicData = __instance._beatmapLevel.GetDifficultyBeatmapData(in beatmapKey);
+#else
 						var basicData = __instance._beatmapLevel.GetDifficultyBeatmapData(beatmapKey.characteristic, beatmapKey.difficulty);
+#endif
 						var njs = basicData?.noteJumpMovementSpeed ?? 0;
 						if(njs == 0)
 							njs = BeatmapDifficultyMethods.NoteJumpMovementSpeed(beatmapKey.difficulty, 0, true);
