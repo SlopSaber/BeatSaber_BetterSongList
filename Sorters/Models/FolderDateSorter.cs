@@ -49,7 +49,7 @@ namespace BetterSongList.SortModels {
 							if(SongCore.Loader.CustomLevelLoader._loadedBeatmapSaveData.TryGetValue(song.levelID, out var saveData)) {
 								var folder = saveData.customLevelFolderInfo.folderPath;
 								if(!string.IsNullOrEmpty(folder))
-									paths.Add(new KeyValuePair<string, string>(song.levelID, Path.Combine(folder, "info.dat")));
+									paths.Add(new KeyValuePair<string, string>(song.levelID, folder));
 							}
 						}
 					}
@@ -57,7 +57,7 @@ namespace BetterSongList.SortModels {
 				await Task.Run(() => {
 					foreach(var entry in paths) {
 						try {
-							songTimes[entry.Key] = (int)File.GetCreationTimeUtc(entry.Value).ToUnixTime();
+							songTimes[entry.Key] = (int)File.GetCreationTimeUtc(Path.Combine(entry.Value, "info.dat")).ToUnixTime();
 						} catch(IOException) {
 						} catch(UnauthorizedAccessException) { }
 					}
