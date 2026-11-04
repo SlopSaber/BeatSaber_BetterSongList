@@ -12,6 +12,9 @@ namespace BetterSongList.Util {
 
 		public static Dictionary<string, BeatmapLevelPack> packs = null;
 
+		static string PackNameFromTitle(string title) =>
+			title.IndexOfAny(new[] { '\t', '\n', '\r' }) < 0 ? title : title.Replace('\t', ' ').Replace('\n', ' ').Replace('\r', ' ');
+
 		public static BeatmapLevelPack GetPack(string packName) {
 			if(packName == null)
 				return null;
@@ -31,7 +34,11 @@ namespace BetterSongList.Util {
 				BeatmapLevelPack wrapper() {
 					if(!SongCore.Loader.AreSongsLoaded)
 						return null;
+					// Building a level pack resolves every song and requests the cover, so match on the title first.
 					foreach(var x in BeatSaberPlaylistsLib.PlaylistManager.DefaultManager.GetAllPlaylists(true)) {
+						var title = x.Title;
+						if(title == null || PackNameFromTitle(title) != packName)
+							continue;
 						var playlistLevelPack = x.PlaylistLevelPack;
 						if(playlistLevelPack.packName == packName)
 							return playlistLevelPack;
