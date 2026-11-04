@@ -58,6 +58,8 @@ namespace BetterSongList.HarmonyPatches.UI {
 
 		static IEnumerator DoTheFunny(TableView table, Transform a) {
 			//yield return new WaitForSeconds(2f);
+			for(var i = 0; i < 3; i++)
+				yield return null;
 			yield return new WaitForEndOfFrame();
 			if(table == null || a == null)
 				yield break;

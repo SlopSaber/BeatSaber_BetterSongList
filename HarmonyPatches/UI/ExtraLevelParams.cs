@@ -52,6 +52,8 @@ namespace BetterSongList.HarmonyPatches.UI {
 
 		static IEnumerator ProcessFields(TextMeshProUGUI[] viewFields) {
 			//Need to wait until the end of frame for reasons beyond my understanding
+			// Deferred one frame past the menu transition so the delayed UI setups do not stack into one hitch.
+			yield return null;
 			yield return new WaitForEndOfFrame();
 			fieldSetup = null;
 			if(extraUI == null || viewFields != fields)

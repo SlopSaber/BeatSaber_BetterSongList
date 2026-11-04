@@ -34,6 +34,8 @@ namespace BetterSongList.HarmonyPatches.UI {
 		}
 
 		static IEnumerator InitDelayed(Transform t) {
+			for(var i = 0; i < 2; i++)
+				yield return null;
 			yield return new WaitForEndOfFrame();
 			if(t != null)
 				FilterUI.AttachTo(t.parent);
