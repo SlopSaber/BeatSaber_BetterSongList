@@ -77,6 +77,8 @@ namespace BetterSongList.HarmonyPatches.UI {
 					return;
 
 				if(hhc == null)
+					hhc = hhint.GetField<HoverHintController, HoverHint>("_hoverHintController");
+				if(hhc == null)
 					hhc = UnityEngine.Object.FindFirstObjectByType<HoverHintController>();
 
 				// Normally zenjected, not here obviously. I dont think the Controller is ever destroyed so we dont need to explicit null check
